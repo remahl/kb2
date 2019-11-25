@@ -39,14 +39,26 @@
 #define DS1WM_CLOCK_DEVISOR_REGISTER 4
 #define K1WM_CHANNEL_SELECT_REGISTER DS1WM_CLOCK_DEVISOR_REGISTER
 #define DS1WM_CONTROL_REGISTER 5
+#define DS1WM_ACK_REGISTER 6
  
+#define ACK_RX  1
+#define ACK_IRQ 2
+
 // Access register via mmap-ed memory
 #define DS1WM_register(in, off) (((uint8_t *) (in->master.ds1wm.mm))[(in->master.ds1wm.base)+off])
 
+uint8_t DS1WM_register_ack(const struct connection_in * in, uint8_t off, uint8_t ack)
+{
+	uint8_t data = DS1WM_register(in, off);
+	DS1WM_register(in,DS1WM_ACK_REGISTER) = ack;
+	return data;
+}
+
 // Register access macros
 #define DS1WM_command(in)	DS1WM_register(in,DS1WM_COMMAND_REGISTER)
-#define DS1WM_txrx(in)		DS1WM_register(in,DS1WM_TXRX_BUFFER)
-#define DS1WM_interrupt(in)	DS1WM_register(in,DS1WM_INTERRUPT_REGISTER)
+#define DS1WM_tx(in)		DS1WM_register(in,DS1WM_TXRX_BUFFER)
+#define DS1WM_rx(in)		DS1WM_register_ack(in,DS1WM_TXRX_BUFFER,ACK_RX)
+#define DS1WM_interrupt(in)	DS1WM_register_ack(in,DS1WM_INTERRUPT_REGISTER,ACK_IRQ)
 #define DS1WM_enable(in)	DS1WM_register(in,DS1WM_INTERRUPT_ENABLE_REGISTER)
 #define DS1WM_clock(in)		DS1WM_register(in,DS1WM_CLOCK_DEVISOR_REGISTER)
 #define K1WM_channel(in)	DS1WM_register(in,K1WM_CHANNEL_SELECT_REGISTER)
@@ -228,6 +240,7 @@ static RESET_TYPE K1WM_reset(const struct parsedname * pn)
 
 	// select channel
 	K1WM_select_channel(in, in->master.ds1wm.active_channel);
+	usleep(10); // settling time after channel is switched on mux
 
 	// read interrupt register to clear all bits
 	(void) DS1WM_interrupt(in);
@@ -368,9 +381,9 @@ static GOOD_OR_BAD K1WM_sendback_byte(const BYTE * data, BYTE * resp, const stru
 {
 	LEVEL_DEBUG("[%s] sending byte: 0x%x", __FUNCTION__, data[0]);
 	RETURN_BAD_IF_BAD( K1WM_wait_for_write(in) ) ;
-	DS1WM_txrx(in) = data[0] ;
+	DS1WM_tx(in) = data[0] ;
 	RETURN_BAD_IF_BAD( K1WM_wait_for_read(in) ) ;
-	resp[0] = DS1WM_txrx(in) ;
+	resp[0] = DS1WM_rx(in) ;
 	LEVEL_DEBUG("[%s] received byte: 0x%x", __FUNCTION__, resp[0]);
 	return gbGOOD ;
 }
@@ -385,6 +398,7 @@ static GOOD_OR_BAD K1WM_sendback_data(const BYTE * data, BYTE * resp, const size
 	size_t i ;
 
 	K1WM_select_channel(in, in->master.ds1wm.active_channel);
+	usleep(10); // settling time after channel is switched on mux
 
 	for (i=0 ; i<len ; ++i ) {
 		RETURN_BAD_IF_BAD( K1WM_sendback_byte( data+i, resp+i, in ) ) ;
@@ -449,14 +463,15 @@ static RESET_TYPE K1WM_wait_for_reset( struct connection_in * in )
 static GOOD_OR_BAD K1WM_wait_for_read( const struct connection_in * in )
 {
 	int i ;
-	
-	if ( UT_getbit( &DS1WM_interrupt(in), e_ds1wm_rbf ) == 1 ) {
+	BYTE data = DS1WM_interrupt(in);
+	if ( UT_getbit( &data, e_ds1wm_rbf ) == 1 ) {
 		return gbGOOD ;
 	}
 
 	for ( i=0 ; i < 5 ; ++i ) {
-		RETURN_BAD_IF_BAD( K1WM_wait_for_byte(in) ) ;
-		if ( UT_getbit( &DS1WM_interrupt(in), e_ds1wm_rbf ) == 1 ) {
+			RETURN_BAD_IF_BAD( K1WM_wait_for_byte(in) );
+			data = DS1WM_interrupt(in);
+			if ( UT_getbit( &data, e_ds1wm_rbf ) == 1 ) {
 			return gbGOOD ;
 		}
 	}
@@ -466,14 +481,15 @@ static GOOD_OR_BAD K1WM_wait_for_read( const struct connection_in * in )
 static GOOD_OR_BAD K1WM_wait_for_write( const struct connection_in * in )
 {
 	int i ;
-	
-	if ( UT_getbit( &DS1WM_interrupt(in), e_ds1wm_tbe ) == 1 ) {
+	BYTE data = DS1WM_interrupt(in);
+	if ( UT_getbit( &data, e_ds1wm_tbe ) == 1 ) {
 		return gbGOOD ;
 	}
 
 	for ( i=0 ; i < 5 ; ++i ) {
 		RETURN_BAD_IF_BAD( K1WM_wait_for_byte(in) ) ;
-		if ( UT_getbit( &DS1WM_interrupt(in), e_ds1wm_tbe ) == 1 ) {
+		data = DS1WM_interrupt(in);
+		if ( UT_getbit( &data, e_ds1wm_tbe ) == 1 ) {
 			return gbGOOD ;
 		}
 	}
