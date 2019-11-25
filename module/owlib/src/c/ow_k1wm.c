@@ -418,7 +418,7 @@ static void K1WM_close(struct connection_in *in)
 static GOOD_OR_BAD K1WM_wait_for_byte( const struct connection_in * in )
 {
 	int bits = in->master.ds1wm.byte_mode ? 8 : 1 ;
-	long int t_slot = in->overdrive ? 15000 : 86000 ; // nsec
+	long int t_slot = in->overdrive ? 50000 : 152000 ; // nsec
 	struct timespec t = {
 		0, 
 		t_slot*bits,
